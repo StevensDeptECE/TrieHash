@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.4.0
+    hooks:
+      - id: trailing-whitespace # Gets rid of trailing whitespace in files (ie end of line)
+      - id: end-of-file-fixer # Make sure there's exactly 1 newline at the end of the file
+      - id: check-added-large-files # Prevent you from unintentionally committing large files
+      - id: check-case-conflict # Stop breaking windows file-name insensitivity (please)
+  - repo: https://gitlab.com/daverona/pre-commit/cpp
+    rev: 0.8.0 # use the most recent version
+    hooks:
+      # Hooks using native
+      - id: clang-format # formatter for C/C++ code based on a style guide
+        args: [-style=Google]
+      #   - id: cpplint              # linter (or style-error checker) for Google C++ Style Guide
+      - id: cppcheck # static analyzer for C/C++ code
+  - repo: https://github.com/Lucas-C/pre-commit-hooks-go
+    rev: v1.0.1
+    hooks:
+      - id: checkmake

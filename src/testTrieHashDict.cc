@@ -1,34 +1,31 @@
-#include "TrieDict.hh"
-#include <unordered_map>
-#include <fstream>
 #include <cstring>
+#include <fstream>
+#include <unordered_map>
+
+#include "TrieDict.hh"
 
 using namespace std;
 
 void load(TrieHashDict& dict) {
-	ifstream f("dict.txt");
-	char word[256];
-	while (!f.eof()) {
-		f.getline(word, sizeof(word));
-		if (word[0]=='\0')
-			continue;
-		
-		uint32_t len = 0;
-		for (; word[len] >= ' '; len++)
-			;
-		dict.add(word, len);
-	}
+  ifstream f("dict.txt");
+  char word[256];
+  while (!f.eof()) {
+    f.getline(word, sizeof(word));
+    if (word[0] == '\0') continue;
+
+    uint32_t len = 0;
+    for (; word[len] >= ' '; len++)
+      ;
+    dict.add(word, len);
+  }
 }
 
 void save(TrieHashDict& dict) {
-	dict.save("dict.bin"); // save the binary form of the dictionary for fast loading
+  dict.save(
+      "dict.bin");  // save the binary form of the dictionary for fast loading
 }
 
-void fastLoad(TrieHashDict& x) {
-	TrieHashDict dict("dict.bin");
-}
-
-
+void fastLoad(TrieHashDict& x) { TrieHashDict dict("dict.bin"); }
 
 #if 0
 unordered_map<string, int> mymap;
@@ -53,18 +50,18 @@ void getunordered_map(uint32_t n) {
 }
 #endif
 
-template<typename Func>
+template <typename Func>
 void benchmark(const char msg[], Func f, TrieHashDict& dict) {
-	clock_t t0 = clock();
-	f(dict);
-	clock_t t1 = clock();
-	cout << msg << "\t" << (t1-t0) << '\n';
+  clock_t t0 = clock();
+  f(dict);
+  clock_t t1 = clock();
+  cout << msg << "\t" << (t1 - t0) << '\n';
 }
 
 int main() {
-	TrieHashDict dict;
-	benchmark("load", load, dict);
-	benchmark("save", save, dict);
-	benchmark("fastload", fastLoad, dict);
-	//	benchmark("unordered_map", loadunordered_map, dict);
+  TrieHashDict dict;
+  benchmark("load", load, dict);
+  benchmark("save", save, dict);
+  benchmark("fastload", fastLoad, dict);
+  //	benchmark("unordered_map", loadunordered_map, dict);
 }
