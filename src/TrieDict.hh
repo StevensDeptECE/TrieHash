@@ -107,26 +107,79 @@ public:
     // compare info.nodeSize > nodeCapacity
     //TODO: CHeck if we need to get more Nodes
   }
-  void add(const char word[], uint32_t len)
-  {
-      if (len <= 2){
-        return; // go into trie and set flag
-      }
-      if (word[0] < 'a' || word[0] > 'z' ||
-          word[1] < 'a' || word[1] > 'z' ||
-          word[2] < 'a' || word[2] > 'z')
-      {
-        throw "bad char";
-      }
+	uint32_t countWordsWithSamePrefix(const uint8_t buf[], uint32_t start, uint32_t size) {
+		uint32_t last = 100000; // the first time, there is no last prefix, so set a value that cannot possible be equal
+		uint32_t countWords = 0;
+		for (uint32_t i = start; i < size; ) {
+			uint8_t c1 = buf[i++];
+			if (c1 < 'a' || c1 > 'z')
+			  goto nextWord;
+			uint8_t c2 = buf[i++];
+			if (c2 < 'a' || c2 > 'z')
+			  goto nextWord;
+			uint8_t c3 = buf[i++];
+			if (c3 < 'a' || c3 > 'z')
+			  goto nextWord;
+			uint32_t which = (c1 * 26 + c2) * 26 + c3;
+			if (which != last) {
+				if (last == 100000) { // first time
+				  countWords = 1;
+				  last = which;
+				} else
+				  return countWords;
+			} else {
+				countWords++;
+			}
+			nextWord:
+			  while (buf[i] >= 'a' && buf[i] <= 'z')
+				  i++; // skip to end of word
+				while (buf[i] < ' ')
+				  i++; // skip any spaces
+		}
+		return countWords;
+	}			  
+
+	void load(const char filename[]) {
+		ifstream f(filename, ios::binary | ios::ate);
+		streamsize size = f.tellg();
+		f.seekg(0, std::ios::beg);
+		char* buf = new char[size];
+		if (!f.read(buf, size))
+		  throw "Error, can't load file";
+		uint32_t last = 100000; // last does not exist the first time
+		for (uint32_t i = 0; i < size; i++) {
+			while (i < size && buf[i] <= ' ')
+			  i++; // skip space
+			uint32_t hashSize = countWordsWithSamePrefix(buf, i, size);
+			for (uint32_t j = 0; j < hashSize; j++) {
+				uint32_t k;
+				for (k = j+1; k < hashSize && buf[k] > 'a'; k++)
+					;
+			  add(buf+i, k - i);
+			}
+		}
+		delete [] buf;
+	}
+
+  void add(const char word[], uint32_t len) {
+    if (len <= 2){
+      return; // go into trie and set flag
+    }
+    if (word[0] < 'a' || word[0] > 'z' ||
+      word[1] < 'a' || word[1] > 'z' ||
+      word[2] < 'a' || word[2] > 'z') {
+      throw "bad char";
+    }
     // ax^2 + bx + c   a*x*x + b*x + c  HORNER's FORM = (a*x+b)*x + c
     int which = whichHash(word);
-    if (which != lastHashMap)
-    {
+    if (which != lastHashMap) {
       lastHashMap = which;
       wordsInCurrentHashMap = 0;
       startIndexOfCurrentHashMap = info.nodeSize;
+			// Now count how many words start with the same 3 letters 
+			// so we can preallocate the right size hash map and not have to grow
 
-      hashmaps[which].base = info.textSize-1;
+      hashmaps[which].base = info.textSize-2; // 0 is null, 1 is special value empty string
       hashmaps[which].baseid = info.nodeSize;
       hashmaps[which].size = 1; // power of 2 -1
 			info.nodeSize = hashmaps[which].baseid + hashmaps[which].size+1;
@@ -150,13 +203,19 @@ private:
   void addWord(uint32_t base, uint32_t baseId, uint32_t hashVal,
                const char letters[], uint32_t len)
   {
+		if (len == 0) {
+	    nodes[hashVal].offset = 1; // special case for empty strings
+	    nodes[hashVal].relid = info.numWords - baseId; // if one hashmap must host more than 64k range, this won't work!
+			return;
+		}
     nodes[hashVal].offset = info.textSize - base; // offset to word in text;
-    nodes[hashVal].relid = info.nodeSize - baseId;
+    nodes[hashVal].relid = info.numWords - baseId; // if one hashmap must host more than 64k range, this won't work!
 
-    for (int i = 0; i < len; i++)
-      text[info.textSize++] = letters[i];
-    text[info.textSize++] = '\0'; // TODO: get rid of this
-    //info.nodeSize++;              //TODO: are nodeSize and numWords the same?
+		uint32_t textSize = info.textSize;
+    for (int i = 0; i < len-1; i++)
+      text[textSize++] = letters[i];
+    text[textSize++] = letters[len-1]|128; // last letter has high bit set. Special case for empty string is the special offset 1
+		info.textSize = textSize;
     info.numWords++;
     wordsInCurrentHashMap++;
   }
