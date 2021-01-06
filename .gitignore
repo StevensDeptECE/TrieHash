@@ -1,5 +1,6 @@
 # first, ignore all
 *
+!src/
 #unignore all with extensions
 !*.*
 
