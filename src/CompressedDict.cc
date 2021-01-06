@@ -48,9 +48,17 @@ Full dictionary
 ...
   0 1 12                          aa is a word,  the 7-bit number following indicates there are 12 words
 
+0 1 100   instead of a node with 100 words, replace by:
+1 1 10000010000000000011000000 	(28 bits)
+0 1 25
+0 1 26
+0 1 24
+0 1 25
 
 
-
+with nodesize = 7 bits, max = 128
+split to 6 bits max = 64, each node split costs 8 bytes overhead
+split to 5 bits max = 32
 
 
 	words are inserted using arithmetic encoding
