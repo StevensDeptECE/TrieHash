@@ -51,5 +51,6 @@ libs/libgrail.a
 cmake-build-*/
 build/
 # ! NOT FROM CMAKE -- our own custom makefile output directory!
+*.bin
 
 .vscode

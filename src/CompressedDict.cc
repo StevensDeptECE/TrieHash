@@ -97,8 +97,7 @@ spare for future expansion
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <stack>
-#include <string>
+//#include <string>
 #include <vector>
 
 #include "Bitstream.hh"
@@ -111,13 +110,13 @@ class CompressedDict1 {
     creating the dictionary. This class is needed while compressing, but the
     dictionary retained in memory should not have this state.
   */
-  stack<BitIterator> ancestors;  // keep track of position of ancestors node to
-                                 // fill in after children are counted
   uint64_t *bitMem;
   BitIterator bits;
   const char *dict;
   uint32_t dictLen;
   vector<uint64_t> compressedWords;
+  uint64_t current;
+  uint64_t power;
 
   static constexpr uint32_t hashSizeBits = 7;
   static constexpr uint32_t maxNodeSize = 1 << hashSizeBits;
@@ -127,15 +126,15 @@ class CompressedDict1 {
   static constexpr uint64_t base8 = base4 * base4;
 
   static constexpr uint64_t baseto13 = base8 * base4 * base;
-
+  static constexpr uint8_t END = base - 1;
+  static constexpr uint8_t END2 = base - 2;
   /*
 1* ('a'-'a') = 0
    27*('b'-'a') = 27
    27*27 *('d'-'a') = 3*27*27=2187
 
 */
-  void writeOneWord(uint64_t &current, uint64_t &power, uint32_t &bufIndex,
-                    uint8_t code) {
+  inline void writeOneChar(uint8_t code) {
     if (power < baseto13) {
       current += code * power;
       power *= base;
@@ -145,30 +144,52 @@ class CompressedDict1 {
       current = code;
     }
   }
+
+  void writeOneWord(uint32_t &dictIndex, uint32_t prefixLen) {
+    for (uint32_t i = 0; i < prefixLen; i++)
+      if (dict[dictIndex] < 'a' || dict[dictIndex] > 'z') {
+        cerr << "Error: prefix letters not within alphabet" << endl;
+        return;
+      }
+    dictIndex += prefixLen;
+    uint8_t c;
+    while ((c = dict[dictIndex++]) >= 'a' && c <= 'z') {
+      // write each letter of the word in base 27 or 28, 13 characters per 64
+      // bit word
+      writeOneChar(c - 'a');
+    }
+    writeOneChar(END);  // end the word with a special token
+    while (dictIndex < dictLen &&
+           dict[dictIndex] <= ' ')  // skip whitespace until next word
+      dictIndex++;
+  }
   inline bool comparePrefix(const char prefix[], uint32_t prefixLen,
                             uint32_t dictIndex) {
     for (uint32_t k = 0; k < prefixLen; k++) {
-      if (prefix[k] != dict[dictIndex + k])
-			  return false;
+      if (prefix[k] != dict[dictIndex + k]) return false;
     }
     return true;
   }
 
   inline uint32_t countThisPrefix(char prefix[], uint32_t prefixLen,
                                   uint32_t dictIndex) {
-    uint32_t countWordsThisPrefix = 1;
-    for (uint32_t j = dictIndex; j < dictLen; j++) {
+    uint32_t countWordsThisPrefix = 0;
+    for (uint32_t j = dictIndex; j < dictLen;) {
       if (comparePrefix(prefix, prefixLen, j)) {
         countWordsThisPrefix++;
+        j += prefixLen;
         if (countWordsThisPrefix > maxNodeSize)
           return countWordsThisPrefix;  // too big, so stop counting so the
                                         // caller can split and recurse
         else
-          break;
+          ;
         // skip to next word
         while (j < dictLen && dict[j] >= 'a' && dict[j] <= 'z')
           j++;  // skip remaining letters in word
-        while (j < dictLen && dict[j] <= ' ') j++;  // skip whitespace after word
+        while (j < dictLen && dict[j] <= ' ')
+          j++;  // skip whitespace after word
+      } else {
+        break;
       }
     }
     return countWordsThisPrefix;
@@ -190,9 +211,10 @@ the bits and then go back and write them.
     f.seekg(0, std::ios::end);  // go to the end
     dictLen = f.tellg();
     compressedWords.reserve(dictLen / 13 + 2);
+    compressedWords.push_back(0);
     f.seekg(0, std::ios::beg);  // go back to the beginning
     dict = new char[dictLen];
-    f.read((char*)dict, dictLen);  // read the whole file into the buffer
+    f.read((char *)dict, dictLen);  // read the whole file into the buffer
     /*
 current prefix, should only need about 4-6 of these characters.
 64 is overkill. At each point count how many words begin with this string
@@ -217,47 +239,66 @@ a maximal number of letters from the front of the dictionary.
     delete[] dict;
   }
 
-  uint32_t recursiveFindPrefix(char prefix[], uint32_t prefixLen,
-                               uint32_t &dictIndex) {
+  uint8_t recursiveFindPrefix(char prefix[], uint32_t prefixLen,
+                              uint32_t &dictIndex) {
     // find each letter after the current prefix, ie for a --> aa, ab, ac,
     // ad ...
     // TODO: load prefix
     uint32_t count;
-		uint32_t childBits = 0;
+    uint32_t childBits = 0;
     if ((count = countThisPrefix(prefix, prefixLen, dictIndex)) > maxNodeSize) {
-      uint32_t thisLevelDictIndex = dictIndex;
+      // too many, split up by considering one more letter prefix
+      BitIterator parentBits = bits;
+      uint32_t isWord = uint32_t(dict[dictIndex + prefixLen] < ' ');
+      bits.orBits((1 << 27) | (isWord << 26), 28);
+
+      // for each letter under this prefix, aa, ab, ac, ...
       for (uint32_t i = dictIndex; i < dictLen;) {
-        if (comparePrefix(prefix, prefixLen, i)) {
-          prefix[prefixLen] = dict[i + prefixLen];
-          uint32_t isWord = uint32_t(dict[i + prefixLen + 1] < ' ');
-          ancestors.push(bits);
-          bits.orBits ((1 << 27) | (isWord << 26), 28);
-          childBits =
-              recursiveFindPrefix(prefix, prefixLen + 1, thisLevelDictIndex);
-          bits = ancestors.top();
-          ancestors.pop();
-          bits -= 26;  // TODO: not implements
-          bits.orBits (childBits, 26);
-          i = dictIndex;  // skip forward past this prefix to the next one
+        // make the new prefix the one we are looking for
+        // the last character in the word: (check if wordLen == prefixLen)
+        if (!comparePrefix(prefix, prefixLen, i)) {
+          dictIndex = i;
+          return 0;
         }
+        if (dict[i + prefixLen] <= ' ') {
+          i += prefixLen;
+          while (dict[i] >= 'a' && dict[i] <= 'z') i++;
+          while (dict[i] <= ' ') i++;
+        }
+
+        prefix[prefixLen] = dict[i + prefixLen];
+        uint8_t childChar = recursiveFindPrefix(prefix, prefixLen + 1, i);
+        if (prefix[0] == 'z' && prefix[1] == 'y' && prefix[2] == 'z') return 0;
+        if (childChar != 0) childBits |= (1 << (childChar - 'a'));
+
+        // the i= in for loop skips forward past this prefix to the next one
       }
-			return childBits; // TODO: this can't be right!!!
+      parentBits.orBits(childBits, 26);
+      return prefix[prefixLen - 1];
     } else {
-			uint32_t isWord = uint32_t(dict[dictIndex + prefixLen + 1] < ' ');
+      uint32_t isWord = uint32_t(dict[dictIndex + prefixLen] < ' ');
       // encode this hash node 0 isWord count count=7 bits at the moment
-      bits.orBits ((isWord << hashSizeBits) | count, hashSizeBits+2);
-      // is a word
-      // append to arithmetic-encoded word list all words without the prefix
-			return 0;
+      bits.orBits((isWord << hashSizeBits) | count, hashSizeBits + 2);
+      // append all words to the list of arithmetic-encoded without the prefix
+      current = 0;
+      power = 1;
+      // uint32_t childBits = 0;
+      for (int k = 0; k < prefixLen; k++) cerr << prefix[k];
+      cerr << "\t" << count << endl;
+      for (uint32_t j = 0; j < count; j++) {
+        // childBits |= 1 << (dict[dictIndex+prefixLen]);
+        writeOneWord(dictIndex, prefixLen);
+      }
+      return prefix[prefixLen - 1];
     }
   }
 
-
   void writeCompressed(const char filename[]) {
     ofstream bin(filename, ios::binary);
-    bin.write((char*)bitMem, (bits.endPointer() - bitMem) * sizeof(uint64_t));
+    bin.write((char *)bitMem, (bits.endPointer() - bitMem) * sizeof(uint64_t));
 
-    bin.write((char*)&compressedWords[0], compressedWords.size() * sizeof(uint64_t));
+    bin.write((char *)&compressedWords[0],
+              compressedWords.size() * sizeof(uint64_t));
   }
 #if 0
   // read the compressed words back from a binary file
@@ -280,13 +321,13 @@ a maximal number of letters from the front of the dictionary.
 };
 
 int main() {
-  CompressedDict1 dict("dict.txt");
+  CompressedDict1 dict("../dict.txt");
   dict.writeCompressed("dict.bin");
-  #if 0
+#if 0
 	{
     ifstream bin("dict.bin");
     CompressedDict1 dict2;
     dict2.readCompressed(bin);
   }
-	#endif
+#endif
 }

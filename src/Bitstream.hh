@@ -94,7 +94,7 @@ class BitIterator {
       bitpos = len - remaining;
     }
   }
-	void operator -=(uint32_t pos) {
+  void operator-=(uint32_t pos) {
 #if 0
 		if (bitpos > 64) {
 			word -= bitpos / 64;
@@ -102,12 +102,12 @@ class BitIterator {
 		}
 #endif
     if (bitpos > pos) {
-			bitpos -= pos;
-		} else {
-			word--;
-			bitpos = 64 - (pos - bitpos);
-		}
-	}
+      bitpos -= pos;
+    } else {
+      word--;
+      bitpos = 64 - (pos - bitpos);
+    }
+  }
   /*
           read len bits out of the current stream and return the value
   */
@@ -124,9 +124,8 @@ class BitIterator {
       return v;
     }
   }
-	const uint64_t* endPointer() const { 
-		if (bitpos == 0)
-		  return word;
-		return word+1;
-	}
+  const uint64_t *endPointer() const {
+    if (bitpos == 0) return word;
+    return word + 1;
+  }
 };
