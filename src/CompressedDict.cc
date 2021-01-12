@@ -118,14 +118,14 @@ class CompressedDict1 {
   uint64_t current;
   uint64_t power;
 
-  static constexpr uint32_t hashSizeBits = 7;
+  static constexpr uint32_t hashSizeBits = 4;
   static constexpr uint32_t maxNodeSize = 1 << hashSizeBits;
   static constexpr uint64_t base = 27;
   static constexpr uint64_t base2 = base * base;
   static constexpr uint64_t base4 = base2 * base2;
   static constexpr uint64_t base8 = base4 * base4;
 
-  static constexpr uint64_t baseto13 = base8 * base4 * base;
+  static constexpr uint64_t baseto12 = base8 * base4;
   static constexpr uint8_t END = base - 1;
   static constexpr uint8_t END2 = base - 2;
   /*
@@ -135,13 +135,14 @@ class CompressedDict1 {
 
 */
   inline void writeOneChar(uint8_t code) {
-    if (power < baseto13) {
+    if (power < baseto12) {
       current += code * power;
       power *= base;
     } else {
+      current += code * power;
       compressedWords.push_back(current);
       power = 1;
-      current = code;
+      current = 0;
     }
   }
 
@@ -206,15 +207,17 @@ space for the bits of the trie node, not knowing what they are, recurse, return
 the bits and then go back and write them.
 */
   CompressedDict1(const char filename[])
-      : bitMem(new uint64_t[3000]), bits(bitMem, 0) {
-    ifstream f(filename);
-    f.seekg(0, std::ios::end);  // go to the end
-    dictLen = f.tellg();
-    compressedWords.reserve(dictLen / 13 + 2);
-    compressedWords.push_back(0);
-    f.seekg(0, std::ios::beg);  // go back to the beginning
-    dict = new char[dictLen];
-    f.read((char *)dict, dictLen);  // read the whole file into the buffer
+      : bitMem(new uint64_t[12000]), bits(bitMem, 0) {
+    {
+      ifstream f(filename);
+      f.seekg(0, std::ios::end);  // go to the end
+      dictLen = f.tellg();
+      compressedWords.reserve(dictLen / 13 + 2);
+      // compressedWords.push_back(0);
+      f.seekg(0, std::ios::beg);  // go back to the beginning
+      dict = new char[dictLen];
+      f.read((char *)dict, dictLen);  // read the whole file into the buffer
+    }
     /*
 current prefix, should only need about 4-6 of these characters.
 64 is overkill. At each point count how many words begin with this string
@@ -231,12 +234,23 @@ a maximal number of letters from the front of the dictionary.
     // many (words > 128)
     uint32_t dictIndex = 0;
     // at the start of the dictionary, first skip potential spaces...
-
+    current = 0;
+    power = 1;
     for (char first = 'a'; first <= 'z'; first++) {
       prefix[0] = first;
       uint32_t index = recursiveFindPrefix(prefix, 1, dictIndex);
     }
     delete[] dict;
+  }
+
+  ~CompressedDict1() { delete[] bitMem; }
+  void displayCompressedWord(uint64_t w) {
+    for (int i = 0; i < 13; i++) {
+      uint8_t c = w % base;
+      cout << (c < END ? (char)(c + 'a') : ' ');
+      w /= base;
+    }
+    cout << flush;
   }
 
   uint8_t recursiveFindPrefix(char prefix[], uint32_t prefixLen,
@@ -258,6 +272,11 @@ a maximal number of letters from the front of the dictionary.
         // the last character in the word: (check if wordLen == prefixLen)
         if (!comparePrefix(prefix, prefixLen, i)) {
           dictIndex = i;
+          // TODO: is this right? at the end of all words starting with
+          // prefix... ex aba.. or in the bits from the child?
+          // aba has child values 0xab92e which is true for _bcd _f__ i__l mn_p
+          // _rst    hex should be e instead of a? a- vxz not correct at all.
+          parentBits.orBits(childBits, 26);
           return 0;
         }
         if (dict[i + prefixLen] <= ' ') {
@@ -268,7 +287,10 @@ a maximal number of letters from the front of the dictionary.
 
         prefix[prefixLen] = dict[i + prefixLen];
         uint8_t childChar = recursiveFindPrefix(prefix, prefixLen + 1, i);
-        if (prefix[0] == 'z' && prefix[1] == 'y' && prefix[2] == 'z') return 0;
+        if (prefix[0] == 'z' && prefix[1] == 'y' && prefix[2] == 'z') {
+          parentBits.orBits(childBits, 26);
+          return 0;
+        }
         if (childChar != 0) childBits |= (1 << (childChar - 'a'));
 
         // the i= in for loop skips forward past this prefix to the next one
@@ -280,8 +302,6 @@ a maximal number of letters from the front of the dictionary.
       // encode this hash node 0 isWord count count=7 bits at the moment
       bits.orBits((isWord << hashSizeBits) | count, hashSizeBits + 2);
       // append all words to the list of arithmetic-encoded without the prefix
-      current = 0;
-      power = 1;
       // uint32_t childBits = 0;
       for (int k = 0; k < prefixLen; k++) cerr << prefix[k];
       cerr << "\t" << count << endl;
@@ -299,6 +319,13 @@ a maximal number of letters from the front of the dictionary.
 
     bin.write((char *)&compressedWords[0],
               compressedWords.size() * sizeof(uint64_t));
+#if 0
+    for (uint32_t i = 0; i < compressedWords.size(); i++)
+      displayCompressedWord(compressedWords[i]);
+#endif
+    ofstream bin2("words.bin", ios::binary);
+    bin2.write((char *)&compressedWords[0],
+               compressedWords.size() * sizeof(uint64_t));
   }
 #if 0
   // read the compressed words back from a binary file
